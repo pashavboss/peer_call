@@ -13,7 +13,7 @@ const getID = () => {
         let r = Math.random() * 16 | 0, v = c === "x" ? r : (r & 0x3 | 0x8);
         return v.toString(16);
     });
-}
+};
 
 const userId = getID(); // user unique session ID
 const eventId = 1; // event id (will be replaced by our event ID when integrated)
@@ -103,7 +103,7 @@ class Video extends React.Component {
                             var conn = peer.connect(this.call.peer);
                             conn.on("open", () => {
                                 leavePage = true;
-                                let sendMessage = new Promise((resolve, reject) => conn.send("decline!"))
+                                new Promise((resolve, reject) => conn.send("decline!"))
                                     .then(resolve => {
                                         conn.close();
                                         this.senderVideoTag = React.createRef();
@@ -256,7 +256,6 @@ class Video extends React.Component {
                 let reader = new window.FileReader();
                 reader.readAsDataURL(mediaBlob);
                 reader.onloadend = () => {
-                     let videoData = reader.result;
                      this.saveStreamInformation(videoDuration, mediaBlob);
                 }
             })()
@@ -307,11 +306,11 @@ class Video extends React.Component {
                     formData.append("file", file);
 
                     fetch(response.data.url, { 
-                        method: 'POST', 
+                        method: "POST",
                         body: formData
                     })
                     .then((response) => console.log("success", response))
-                    .catch((error) => alert( "error", e ))
+                    .catch((error) => alert("error", error))
                     .finally(() => {
                         leavePage = true;
                         ws.close();

@@ -74,7 +74,6 @@ class Video extends React.Component {
 
         // initialize peer connection
         if (peer_key !== null) {
-            console.log("here!")
             peer = new Peer({ key: peer_key, debug: 3, config: Xirsys.getServers()});
         } else {
             peer = new Peer(userId);
@@ -289,7 +288,6 @@ class Video extends React.Component {
             onopen: e => {
                 console.log("open connection!");
                 ws.json(data);
-                console.log("send message!");
                 // ws.close()
                 
             },

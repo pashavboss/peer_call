@@ -1,9 +1,7 @@
 import React from "react";
-import Peer from "peerjs";
-import {confirmAlert} from "react-confirm-alert";
+import { confirmAlert } from "react-confirm-alert";
 import "react-confirm-alert/src/react-confirm-alert.css";
 import Xirsys from "../modules/Xirsys";
-import Sockette from "sockette";
 import { config } from "../config";
 import getBlobDuration from "get-blob-duration";
 
@@ -17,9 +15,24 @@ const getID = () => {
 
 const userId = getID(); // user unique session ID
 const eventId = 1; // event id (will be replaced by our event ID when integrated)
-var peer = null; // peer connection
 var leavePage = true; // variable for leave page
+var socketConnection = null;
+var peerConnection = null;
+var connectedUserName;
+var connectedUserConnectionId;
 
+
+function sendMessage(message) {
+    //attach the other peer username to our messages 
+    if (connectedUserName) {
+        message.name = connectedUserName;
+    }
+    if (connectedUserConnectionId) {
+        message.connectedUserId = connectedUserConnectionId;
+    }
+    message.myName = userId;
+    socketConnection.send(JSON.stringify(message));
+}
 
 
 // window event listener for page leaving
@@ -36,8 +49,8 @@ window.addEventListener("beforeunload", function (e) {
 const mediaConstraints = {
     audio: true,
     video: {
-        "min": {"width": "440", "height": "250"},
-        "max": {"width": "800", "height": "600"}
+        "min": { "width": "440", "height": "250" },
+        "max": { "width": "800", "height": "600" }
     }
 };
 
@@ -49,20 +62,21 @@ class Video extends React.Component {
             connectionType: "sender",
             callId: "",
             isCalling: false,
-            temp: ""
+            offer: null,
         };
         this.senderVideoTag = React.createRef();
         this.receiverVideoTag = React.createRef();
+        this.remoteStream = null;
         this.mediaRecorder = null;
         this.call = null;
+        this.videoFile = null;
 
-        this.startStream = this.startStream.bind(this);
         this.componentDidCallback = this.componentDidCallback.bind(this);
     }
 
     handleOnChange(e) {
-        let {name, value} = e.target;
-        this.setState({[name]: value});
+        let { name, value } = e.target;
+        this.setState({ [name]: value });
     }
 
     componentDidMount() {
@@ -70,121 +84,62 @@ class Video extends React.Component {
     }
 
     componentDidCallback() {
-        let {peer_key} = config;
+        socketConnection = new WebSocket(config.aws.websocket);
 
-        // initialize peer connection
-        if (peer_key !== null) {
-            peer = new Peer({ key: peer_key, debug: 3, config: Xirsys.getServers()});
-        } else {
-            peer = new Peer(userId);
-        }
-        
-        // peer error handler
-        peer.on("error", function (err) {
-            alert("peer error", err);
-        });
-
-        var userMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-
-        // peer call handler
-        peer.on("call", (call) => {
-            this.call = call;
-            confirmAlert({
-                title: "Someone is calling to you",
-                message: `User with id ${call.peer} is calling to you. Answer?`,
-                buttons: [
-                    {
-                        label: "Yes",
-                        onClick: () => this.callEvents(userMedia)
-                    },
-                    {
-                        label: "No",
-                        onClick: () => {
-                            var conn = peer.connect(this.call.peer);
-                            conn.on("open", () => {
-                                leavePage = true;
-                                new Promise((resolve, reject) => conn.send("decline!"))
-                                    .then(resolve => {
-                                        conn.close();
-                                        this.senderVideoTag = React.createRef();
-                                    });
-                            });
-                        }
-                    }
-                ]
+        socketConnection.onopen = function () {
+            console.log("Connected to the signaling server");
+            sendMessage({
+                type: "login",
+                name: userId
             });
-        });
+        };
 
-        // peer connection handler:
-        // used to close the connection when the user to whom you called decline the call
-        peer.on("connection", conn => {
-            conn.on("data", msg => {
-                if (msg) {
-                    leavePage = true;
-                    this.stopVideoRecord();
-                    alert("The call was canceled");
-                }
-            });
-        });
-    }
+        // when we got a message from a signaling server 
+        socketConnection.onmessage = (msg) => {
+            // console.log("Got message", msg.data);
 
-    callEvents(userMedia) {
-        userMedia({video: true, audio: true}, stream => {
-            this.setState({
-                isCalling: true,
-                connectionType: "receiver"
-            });
+            let data = JSON.parse(msg.data);
 
-            try {
-                this.senderVideoTag.current.srcObject = stream;
-            } catch (e) {
-                this.senderVideoTag = {
-                    current: {
-                        srcObject: stream
-                    }
-                }
+            switch (data.type) {
+                case "login":
+                    this.initConnection();
+                    break;
+                // when somebody wants to call us 
+                case "offer":
+                    this.handleOffer(data);
+                    break;
+                case "answer":
+                    this.handleAnswer(data.answer, data.myConnId);
+                    break;
+                // when a remote peer sends an ice candidate to us 
+                case "candidate":
+                    this.handleCandidate(data.candidate);
+                    break;
+                case "leave":
+                    this.handleLeave();
+                    break;
+                case "signedUrl":
+                    this.sendDataToSignedUrl(data.data);
+                    break;
+                default:
+                    break;
             }
-            this.call.answer(stream); // anwer the call
-            this.call.on("stream", remoteStream => { // stream start event
-                this.startRecording(remoteStream);
-                leavePage = false;
+        };
 
-                try {
-                    this.receiverVideoTag.current.srcObject = remoteStream;
-                } catch (e) {
-                    this.receiverVideoTag = {
-                        current: {
-                            srcObject: remoteStream
-                        }
-                    }
-                }
-            });
-            this.call.on("close", () => { // stream close event
-                this.receiverVideoTag = React.createRef();
-                this.mediaRecorder.stop();
-                this.stopVideoRecord(stream);
-            });
-        }, err => alert("Failed to get local stream", err));
+        socketConnection.onerror = function (err) {
+            console.log("Got error", err);
+        };
     }
 
-    stopVideoRecord(stream = undefined) {
-        if (stream !== undefined) {
-            stream.getTracks().forEach(track => track.stop());
-        }
-        if (this.senderVideoTag.current !== null && this.senderVideoTag.current.srcObject !== null) {
-            this.senderVideoTag.current.srcObject.getTracks().forEach(track => track.stop());
-        }
-        this.senderVideoTag = React.createRef();
-        this.setState({isCalling: false});
-    }
+    initConnection(recreateConnection = false, callbackFunction) {
+        var getUserMedia = (navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia).bind(navigator);
 
-    startStream() {
-        var getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+        getUserMedia(mediaConstraints, stream => {
+            let configuration = {
+                "iceServers": Xirsys.getServers()
+            };
 
-        getUserMedia(mediaConstraints, (stream) => {
-            var call = peer.call(this.state.callId, stream);
-
-            this.setState({isCalling: true});
+            peerConnection = new RTCPeerConnection(configuration);
 
             try {
                 this.senderVideoTag.current.srcObject = stream;
@@ -196,50 +151,174 @@ class Video extends React.Component {
                 };
             }
 
-            if (peer.id !== null) {
-                call.on("stream", (remoteStream) => { // stream start event
-                    leavePage = false;
-                    this.startRecording(remoteStream);
-                    try {
-                        this.receiverVideoTag.current.srcObject = remoteStream;
-                    } catch (e) {
-                        this.receiverVideoTag = {
-                            current: {
-                                srcObject: remoteStream
-                            }
-                        };
-                    }
-                });
-                call.on("close", () => { // stream close event
-                    this.receiverVideoTag = React.createRef();
-                    this.mediaRecorder.stop();
-                    this.stopVideoRecord(stream);
-                });
+            // setup stream listening 
+            peerConnection.addStream(stream);
+
+            //when a remote user adds stream to the peer connection, we display it 
+            peerConnection.onaddstream = (e) => {
+                let remoteStream = e.stream;
+                this.setState({ isCalling: true });
+
+                // start stream recording 
+                this.startRecording(remoteStream);
+                leavePage = false;
+
+                // show remote stream
+                try {
+                    this.receiverVideoTag.current.srcObject = remoteStream;
+                } catch (e) {
+                    this.receiverVideoTag = {
+                        current: {
+                            srcObject: remoteStream
+                        }
+                    };
+                }
+                this.remoteStream = remoteStream;
+            };
+
+            // setup ice handling 
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    sendMessage({
+                        type: "candidate",
+                        candidate: event.candidate
+                    });
+                }
+            };
+
+            // call function when recreate connection
+            if (recreateConnection) {
+                callbackFunction();
             }
-            this.call = call;
-        }, err => alert("Failed to get local stream", err));
+
+        }, err => alert(`Failed to get local stream: ${err}`));
+    }
+
+    handleLeave(finishCall = false) {
+        let { isCalling } = this.state;
+        peerConnection.close();
+        peerConnection.onicecandidate = null;
+        this.receiverVideoTag = React.createRef();
+
+        if (finishCall && isCalling) {
+            this.stopVideoRecord();
+        } else if (!finishCall && isCalling) {
+            this.stopVideoRecord();
+            alert(`${connectedUserName} finished the call`);
+        } else if (!finishCall && !isCalling) {
+            alert(`${connectedUserName} decline the call`);
+        }
+
+        connectedUserName = null;
+        this.setState({ isCalling: false });
+    }
+
+    handleAnswer(answer, connectedId) {
+        connectedUserConnectionId = connectedId;
+        peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    }
+
+    handleOffer(data) {
+        let { offer, name, myConnId } = data;
+        connectedUserName = name;
+        connectedUserConnectionId = myConnId;
+
+        confirmAlert({
+            title: "Someone is calling to you",
+            message: `User with id ${name} is calling to you. Answer?`,
+            buttons: [
+                {
+                    label: "Yes",
+                    onClick: () => {
+
+                        this.setState({
+                            connectionType: "receiver"
+                        });
+
+                        peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+                        //create an answer to an offer 
+                        peerConnection.createAnswer(answer => {
+                            console.log("create answer", answer)
+                            peerConnection.setLocalDescription(answer);
+
+                            sendMessage({
+                                type: "answer",
+                                answer: answer
+                            });
+                        }, error => alert(`Error when creating an answer: ${error}`));
+                    }
+                },
+                {
+                    label: "No",
+                    onClick: () => {
+                        sendMessage({
+                            type: "leave"
+                        });
+                        this.handleLeave(true);
+                    }
+                }
+            ]
+        });
 
     }
 
+    handleCandidate(candidate) {
+        // check current connection state:
+        // if is available - add ice candidate, else - recreate connection and add ice candidate
+        if (peerConnection.connectionState === "closed") {
+            this.initConnection(true, () => peerConnection.addIceCandidate(new RTCIceCandidate(candidate)))
+        } else {
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+        }
+    }
+
+    stopVideoRecord() {
+        this.mediaRecorder.stop();
+        this.remoteStream.getTracks().forEach(track => track.stop());
+        this.setState({ isCalling: false });
+    }
+
     handleCall() {
-        let {callId} = this.state;
+        let { callId } = this.state;
         // check if the id is not null and is not the user id
         if (callId === userId) {
-            alert("You can\"t call yourself");
+            alert("You can't call yourself");
             return
         } else if (callId === "") {
             alert("Please set id");
             return
         }
 
-        Xirsys.doICE(this.startStream);
+        connectedUserName = this.state.callId;
+
+        // check current connection state:
+        // if is available - create an offer, else - recreate connection and create an offer
+        if (peerConnection.connectionState === "closed") {
+            this.initConnection(true, () => this.createOffer());
+        } else {
+            this.createOffer();
+        }
+    }
+
+    createOffer() {
+        peerConnection.createOffer(offer => {
+            sendMessage({
+                type: "offer",
+                offer: offer,
+            });
+
+            peerConnection.setLocalDescription(offer);
+        }, function (error) {
+            alert(`Error when creating an offer: ${error}`);
+        });
     }
 
     handleFinishCall() {
-        this.call.close();
-        if (this.mediaRecorder !== null && this.mediaRecorder.state === "recording") {
-            this.mediaRecorder.stop();
-        }
+        sendMessage({
+            type: "leave"
+        });
+        this.handleLeave(true);
     }
 
     startRecording(stream) {
@@ -249,27 +328,24 @@ class Video extends React.Component {
         mediaRecorder.ondataavailable = event => recordedChunks.push(event.data);
         mediaRecorder.start();
         mediaRecorder.onstop = e => {
-            let mediaBlob = new Blob([recordedChunks[0]], {type: "video/mp4"}); // create video blob object after stream
-
+            let mediaBlob = new Blob([recordedChunks[0]], { type: "video/mp4" }); // create video blob object after stream
+            this.videoFile = new File([mediaBlob], "File name", { type: "video/mp4" });
             (async () => {
                 let videoDuration = await getBlobDuration(mediaBlob);
                 let reader = new window.FileReader();
                 reader.readAsDataURL(mediaBlob);
-                reader.onloadend = () => {
-                     this.saveStreamInformation(videoDuration, mediaBlob);
-                }
+                reader.onloadend = () => this.saveStreamInformation(videoDuration, mediaBlob);
             })()
         };
 
         this.mediaRecorder = mediaRecorder;
     }
 
-    saveStreamInformation(videoDuration, mediaBlob) {
-
-        const file = new File([mediaBlob], "File name",{ type: "video/mp4" })
+    saveStreamInformation(videoDuration) {
         // information about stream
 
         const data = {
+            "type": "createSignedUrl",
             "eventid": eventId.toString(),
             "userid": 1, // set user id here!
             "video_length": Math.ceil(videoDuration).toString(),
@@ -279,61 +355,50 @@ class Video extends React.Component {
             "completed": true,
             "timestamp": new Date().getTime()
         };
+        sendMessage(data);
+    }
 
-        // create websocket connection and send message with stream information
-        const ws = new Sockette(config.aws.websocket, {
-            timeout: 5e3,
-            maxAttempts: 10,
-            onopen: e => {
-                console.log("open connection!");
-                ws.json(data);
-                // ws.close()
-                
-            },
-            onmessage: e => {
-                let response = JSON.parse(e.data);
-                if (response.event === "success") {
-                    let formData = new FormData();
-                    let {fields} = response.data;
+    sendDataToSignedUrl(response) {
+        // send message with stream information
 
-                    // add fields
-                    for (let f in fields) { // fields from signed url request
-                        if(!fields.hasOwnProperty(f)) continue;
-                        formData.append(f, fields[f]);
-                    }
 
-                    // add file
-                    formData.append("file", file);
+        if (response.event === "success") {
+            let formData = new FormData();
+            let { fields } = response.data;
 
-                    fetch(response.data.url, { 
-                        method: "POST",
-                        body: formData
-                    })
-                    .then((response) => console.log("success", response))
-                    .catch((error) => alert("error", error))
-                    .finally(() => {
-                        leavePage = true;
-                        ws.close();
-                    });
-                }
-            },
-            onreconnect: e => console.log("Reconnecting...", e),
-            onclose: e => console.log("Closed!", e),
-            onerror: e => console.log("Error:", e)
-        });
-        leavePage = true;
+            // add fields
+            for (let f in fields) { // fields from signed url request
+                if (!fields.hasOwnProperty(f)) continue;
+                formData.append(f, fields[f]);
+            }
+
+            // add file
+            formData.append("file", this.videoFile);
+
+            fetch(response.data.url, {
+                method: "POST",
+                body: formData
+            })
+                .then(response => console.log("success", response))
+                .catch(error => alert(`error ${error}`))
+                .finally(() => {
+                    leavePage = true;
+                });
+        } else {
+            leavePage = true;
+        }
     }
 
     render() {
-        let {connectionType, callId, isCalling} = this.state;
+        let { connectionType, callId, isCalling } = this.state;
 
         return (
             <div className="container">
                 My id: {userId}
                 <div className="select-container">
                     <select name="connectionType"
-                            value={connectionType}
-                            onChange={e => this.handleOnChange(e)}>
+                        value={connectionType}
+                        onChange={e => this.handleOnChange(e)}>
                         <option value="receiver">Receiver</option>
                         <option value="sender">Sender</option>
                     </select>
@@ -343,7 +408,7 @@ class Video extends React.Component {
                     ? (
                         <div>
                             <input name="callId" value={callId} onChange={e => this.handleOnChange(e)}
-                                   placeholder="Please enter the id number"/>
+                                placeholder="Please enter the id number" />
                             <button onClick={() => this.handleCall()}>Call</button>
                         </div>
                     )
@@ -354,27 +419,24 @@ class Video extends React.Component {
                     )
                 }
 
-                {isCalling && (
-                    <div>
-                        <div className="video-panel">
-                            <div>
-                                Your video
-                                <br/>
-                                <video id="user-video" autoPlay={true} ref={this.senderVideoTag}/>
-                            </div>
-
-                            <div>
-                                Your friend video
-                                <br/>
-                                <video id="friend-video" autoPlay={true} ref={this.receiverVideoTag}/>
-                            </div>
+                <div>
+                    <div className="video-panel">
+                        <div>
+                            Your video
+                            <br />
+                            <video id="user-video" autoPlay={true} ref={this.senderVideoTag} />
                         </div>
 
-                        <button onClick={() => this.handleFinishCall()}>Finish call</button>
-
+                        <div>
+                            Your friend video
+                            <br />
+                            <video id="friend-video" autoPlay={true} ref={this.receiverVideoTag} />
+                        </div>
                     </div>
-                )}
 
+                    {isCalling && <button onClick={() => this.handleFinishCall()}>Finish call</button>}
+
+                </div>
             </div>
         )
     }

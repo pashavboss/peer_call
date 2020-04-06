@@ -26,7 +26,6 @@ const Xirsys = {
             var v = item.url;
             if(!!v){
                 item.urls = v;
-                delete item.url;
             }
             a.push(item);
         }

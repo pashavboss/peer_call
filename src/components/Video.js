@@ -133,7 +133,7 @@ class Video extends React.Component {
         navigator.mediaDevices.getUserMedia(mediaConstraints)
         .then(stream => { 
             let configuration = {
-                "iceServers": [Xirsys.getServers()[0]]
+                "iceServers": Xirsys.getServers()
             };
 
             peerConnection = new RTCPeerConnection(configuration);
@@ -419,7 +419,7 @@ class Video extends React.Component {
                         <div>
                             Your video
                             <br />
-                            <video id="user-video" autoPlay={true} ref={this.senderVideoTag} />
+                            <video id="user-video" autoPlay={true} ref={this.senderVideoTag} muted={true} />
                         </div>
 
                         <div>

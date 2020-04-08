@@ -32,7 +32,7 @@ const Xirsys = {
         return a;
     },
     getServers() {
-        return this.iceServers;
+        return (this.iceServers.length > 2) ? [this.iceServers[0], this.iceServers[1]] : this.iceServers;
     },
     async doICE (callbackFunction) {
         let { ident, secret, channel } = config.xirsys.info;

@@ -4,6 +4,7 @@ import "react-confirm-alert/src/react-confirm-alert.css";
 import Xirsys from "../modules/Xirsys";
 import { config } from "../config";
 import getBlobDuration from "get-blob-duration";
+import adapter from 'webrtc-adapter';
 
 // function for creating unique user id
 const getID = () => {
@@ -48,10 +49,7 @@ window.addEventListener("beforeunload", function (e) {
 // media properties
 const mediaConstraints = {
     audio: true,
-    video: {
-        "min": { "width": "440", "height": "250" },
-        "max": { "width": "800", "height": "600" }
-    }
+    video: true
 };
 
 
@@ -132,11 +130,10 @@ class Video extends React.Component {
     }
 
     initConnection(recreateConnection = false, callbackFunction) {
-        var getUserMedia = (navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia).bind(navigator);
-
-        getUserMedia(mediaConstraints, stream => {
+        navigator.mediaDevices.getUserMedia(mediaConstraints)
+        .then(stream => { 
             let configuration = {
-                "iceServers": Xirsys.getServers()
+                "iceServers": [Xirsys.getServers()[0]]
             };
 
             peerConnection = new RTCPeerConnection(configuration);
@@ -190,8 +187,8 @@ class Video extends React.Component {
             if (recreateConnection) {
                 callbackFunction();
             }
-
-        }, err => alert(`Failed to get local stream: ${err}`));
+         })
+         .catch(error => alert(`Failed to get local stream: ${error}`))
     }
 
     handleLeave(finishCall = false) {
@@ -239,7 +236,6 @@ class Video extends React.Component {
 
                         //create an answer to an offer 
                         peerConnection.createAnswer(answer => {
-                            console.log("create answer", answer)
                             peerConnection.setLocalDescription(answer);
 
                             sendMessage({
@@ -267,10 +263,10 @@ class Video extends React.Component {
         // check current connection state:
         // if is available - add ice candidate, else - recreate connection and add ice candidate
         if (peerConnection.connectionState === "closed") {
-            this.initConnection(true, () => peerConnection.addIceCandidate(new RTCIceCandidate(candidate)))
+            this.initConnection(true, () => peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {}))
         } else {
-            peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
-        }
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {});
+        }        
     }
 
     stopVideoRecord() {
@@ -360,7 +356,6 @@ class Video extends React.Component {
 
     sendDataToSignedUrl(response) {
         // send message with stream information
-
 
         if (response.event === "success") {
             let formData = new FormData();

@@ -104,16 +104,20 @@ class Video extends React.Component {
                     break;
                 // when somebody wants to call us 
                 case "offer":
+                    console.log("get offer");
                     this.handleOffer(data);
                     break;
                 case "answer":
+                    console.log("get answer")
                     this.handleAnswer(data.answer, data.myConnId);
                     break;
                 // when a remote peer sends an ice candidate to us 
                 case "candidate":
+                    console.log("get candidate");
                     this.handleCandidate(data.candidate);
                     break;
                 case "leave":
+                    console.log("get leave");
                     this.handleLeave();
                     break;
                 case "signedUrl":
@@ -157,7 +161,7 @@ class Video extends React.Component {
                 this.setState({ isCalling: true });
 
                 // start stream recording 
-                this.startRecording(remoteStream);
+                // this.startRecording(remoteStream);
                 leavePage = false;
 
                 // show remote stream
@@ -180,6 +184,7 @@ class Video extends React.Component {
                         type: "candidate",
                         candidate: event.candidate
                     });
+                    console.log("sent candidate");
                 }
             };
 
@@ -198,9 +203,9 @@ class Video extends React.Component {
         this.receiverVideoTag = React.createRef();
 
         if (finishCall && isCalling) {
-            this.stopVideoRecord();
+            // this.stopVideoRecord();
         } else if (!finishCall && isCalling) {
-            this.stopVideoRecord();
+            // this.stopVideoRecord();
             alert(`${connectedUserName} finished the call`);
         } else if (!finishCall && !isCalling) {
             alert(`${connectedUserName} decline the call`);
@@ -242,6 +247,7 @@ class Video extends React.Component {
                                 type: "answer",
                                 answer: answer
                             });
+                            console.log("sent answer");
                         }, error => alert(`Error when creating an answer: ${error}`));
                     }
                 },
@@ -251,6 +257,7 @@ class Video extends React.Component {
                         sendMessage({
                             type: "leave"
                         });
+                        console.log("leave");
                         this.handleLeave(true);
                     }
                 }
@@ -290,8 +297,12 @@ class Video extends React.Component {
 
         // check current connection state:
         // if is available - create an offer, else - recreate connection and create an offer
+        console.log("peerConnection.connectionState", peerConnection.connectionState);
         if (peerConnection.connectionState === "closed") {
-            this.initConnection(true, () => this.createOffer());
+            this.initConnection(true, () => {
+                console.log("recreate connection"); 
+                this.createOffer();
+            });
         } else {
             this.createOffer();
         }
@@ -299,6 +310,7 @@ class Video extends React.Component {
 
     createOffer() {
         peerConnection.createOffer(offer => {
+            console.log("sent offer");
             sendMessage({
                 type: "offer",
                 offer: offer,
@@ -314,6 +326,7 @@ class Video extends React.Component {
         sendMessage({
             type: "leave"
         });
+        console.log("leave");
         this.handleLeave(true);
     }
 
@@ -419,7 +432,7 @@ class Video extends React.Component {
                         <div>
                             Your video
                             <br />
-                            <video id="user-video" autoPlay={true} ref={this.senderVideoTag} muted={true} />
+                            <video id="user-video" autoPlay={true} ref={this.senderVideoTag} muted={true} playsInline={true}/>
                         </div>
 
                         <div>

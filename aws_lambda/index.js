@@ -139,7 +139,7 @@ exports.handler = (event, context, callback) => {
                     sendTo(conn.connectionId, {
                         type: "offer",
                         offer: data.offer,
-                        name: conn.name,
+                        name: data.myName,
                         connectionId: conn.connectionId,
                         myConnId: connection.connectionId
                     });
@@ -162,24 +162,24 @@ exports.handler = (event, context, callback) => {
                 let connCand = users[data.name];
                 
                 if (data.hasOwnProperty("connectedUserId")) {
-                  sendTo(data.connectedUserId, {
-                      type: "candidate",
-                      candidate: data.candidate,
-                      name: data.myName,
-                      myConnId: connection.connectionId
-                  });
+                    sendTo(data.connectedUserId, {
+                        type: "candidate",
+                        candidate: data.candidate,
+                        name: data.myName,
+                        myConnId: connection.connectionId
+                    });
                 }
-      			
-                if(connCand != null) { 
-                  sendTo(connCand.connectionId, { 
-                      type: "candidate",
-                      name: data.myName,
-                      candidate: data.candidate,
-                      connectionId: connCand.connectionId,
-                      myConnId: connection.connectionId
-                  }); 
+
+                if (connCand != null) {
+                    sendTo(connCand.connectionId, {
+                        type: "candidate",
+                        name: data.myName,
+                        candidate: data.candidate,
+                        connectionId: connCand.connectionId,
+                        myConnId: connection.connectionId
+                    });
                 }
-      			
+
                 break;
 
             case "leave":
